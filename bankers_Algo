@@ -1,0 +1,139 @@
+"""
+Banker's Algorithm (Deadlock Avoidance)
+=======================================
+Checks whether a system is in a SAFE state and, if so, prints a safe
+sequence of processes.
+
+The system data (Allocation, Maximum, Available) is defined once in the
+"SYSTEM DATA" section below, so the program runs and prints its output
+right away with no typing needed. To test another system, just edit
+those values.
+
+Output: Need matrix, safe / unsafe state, and the safe sequence.
+
+Key idea
+--------
+  Need[i][j] = Max[i][j] - Allocation[i][j]
+
+A state is SAFE if there is an order in which every process can obtain the
+resources it still needs, finish, and release what it holds.
+"""
+
+import sys
+
+# Make sure the arrow character prints correctly on Windows consoles.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+
+# --------------------------------------------------------------------------
+# SYSTEM DATA (edit these values to test a different system)
+# --------------------------------------------------------------------------
+# 5 processes (P0-P4) and 3 resource types (A, B, C).
+
+# Resources currently held by each process (one row per process).
+allocation = [
+    [0, 1, 0],   # P0
+    [2, 0, 0],   # P1
+    [3, 0, 2],   # P2
+    [2, 1, 1],   # P3
+    [0, 0, 2],   # P4
+]
+
+# Maximum resources each process may ever request.
+maximum = [
+    [7, 5, 3],   # P0
+    [3, 2, 2],   # P1
+    [9, 0, 2],   # P2
+    [2, 2, 2],   # P3
+    [4, 3, 3],   # P4
+]
+
+# Resources currently free in the system.
+available = [3, 3, 2]
+
+
+# --------------------------------------------------------------------------
+# BANKER'S ALGORITHM
+# --------------------------------------------------------------------------
+def calculate_need(maximum, allocation):
+    """Need = Max - Allocation, computed element by element."""
+    return [[maximum[i][j] - allocation[i][j] for j in range(len(maximum[0]))]
+            for i in range(len(maximum))]
+
+
+def is_safe(allocation, need, available):
+    """
+    Safety algorithm.
+
+    1. Work   = copy of Available (resources free right now).
+       Finish = [False] * n (no process has finished yet).
+    2. Find an unfinished process i whose Need <= Work.
+    3. Pretend it runs to completion: Work += Allocation[i], mark it finished,
+       and add it to the safe sequence.
+    4. Repeat until no such process exists.
+    5. If all processes finished -> SAFE, otherwise -> UNSAFE.
+
+    Returns (safe: bool, sequence: list of process indexes).
+    """
+    n = len(allocation)
+    m = len(available)
+
+    work = available[:]        # copy so the original vector is not changed
+    finish = [False] * n
+    sequence = []
+
+    progress = True
+    while progress:
+        progress = False
+        for i in range(n):
+            # Can process i get everything it still needs right now?
+            if not finish[i] and all(need[i][j] <= work[j] for j in range(m)):
+                # Yes: it finishes and releases everything it was holding.
+                for j in range(m):
+                    work[j] += allocation[i][j]
+                finish[i] = True
+                sequence.append(i)
+                progress = True
+
+    return all(finish), sequence
+
+
+# --------------------------------------------------------------------------
+# MAIN PROGRAM
+# --------------------------------------------------------------------------
+def main():
+    n = len(allocation)
+
+    # Sanity check: a process can't hold more than its declared maximum,
+    # otherwise Need would be negative.
+    for i in range(n):
+        for j in range(len(available)):
+            if allocation[i][j] > maximum[i][j]:
+                print(f"Error: Allocation of P{i} for resource {j} is "
+                      "greater than its Maximum. Please fix the data.")
+                return
+
+    need = calculate_need(maximum, allocation)
+
+    print("Need Matrix:")
+    for i in range(n):
+        print(f"P{i}: {need[i]}")
+
+    safe, sequence = is_safe(allocation, need, available)
+
+    print()
+    if safe:
+        print("System is in a Safe State.")
+        print("Safe Sequence: " + " → ".join(f"P{i}" for i in sequence))
+    else:
+        print("System is NOT in a Safe State (Unsafe State). "
+              "A deadlock is possible.")
+        stuck = [f"P{i}" for i in range(n) if i not in sequence]
+        print("Processes that cannot finish: " + ", ".join(stuck))
+
+
+if __name__ == "__main__":
+    main()

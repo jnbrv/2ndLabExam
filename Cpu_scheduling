@@ -1,0 +1,235 @@
+"""
+CPU Scheduling Simulator
+========================
+Simulates two scheduling algorithms on the same set of processes:
+
+  1. First Come First Serve (FCFS)  -> NON-PREEMPTIVE
+  2. Round Robin (RR)               -> PREEMPTIVE
+
+Input  (console): number of processes, arrival time and burst time of each
+                  process, and the time quantum (for Round Robin).
+Output          : Gantt chart, per-process table, Average Waiting Time,
+                  and Average Turnaround Time.
+
+Formulas used
+-------------
+  Turnaround Time (TAT) = Completion Time - Arrival Time
+  Waiting Time    (WT)  = Turnaround Time - Burst Time
+"""
+
+import sys
+from collections import deque
+
+# Make sure the console can print everything on Windows too.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+
+# --------------------------------------------------------------------------
+# INPUT HELPERS
+# --------------------------------------------------------------------------
+def read_int(prompt, minimum=0):
+    """Keep asking until the user types an integer >= minimum."""
+    while True:
+        try:
+            value = int(input(prompt))
+            if value < minimum:
+                print(f"  Please enter a number >= {minimum}.")
+                continue
+            return value
+        except ValueError:
+            print("  Invalid input. Please enter a whole number.")
+
+
+def read_processes():
+    """Ask the user for the process data and return it as a list of dicts."""
+    n = read_int("Enter number of processes: ", minimum=1)
+    processes = []
+    for i in range(n):
+        print(f"\nProcess P{i}")
+        arrival = read_int("  Arrival time : ", minimum=0)
+        burst = read_int("  Burst time   : ", minimum=1)  # burst must be > 0
+        processes.append({"pid": f"P{i}", "arrival": arrival, "burst": burst})
+    return processes
+
+
+# --------------------------------------------------------------------------
+# GANTT CHART HELPERS
+# --------------------------------------------------------------------------
+def add_segment(gantt, label, start, end):
+    """
+    Add an execution block (label, start, end) to the Gantt list.
+    If the previous block is the same process and touches this one,
+    merge them so the chart stays short and readable.
+    """
+    if gantt and gantt[-1][0] == label and gantt[-1][2] == start:
+        gantt[-1] = (label, gantt[-1][1], end)
+    else:
+        gantt.append((label, start, end))
+
+
+def print_gantt(gantt):
+    """Draw the Gantt chart as text, with a time line underneath."""
+    bar = "|"
+    times = ""
+    for label, start, end in gantt:
+        cell = f" {label} "
+        width = max(len(cell), len(str(start)), len(str(end))) + 2
+        bar += cell.center(width) + "|"
+        # Place the start time under the left border of each block.
+        times += str(start).ljust(width + 1)
+    times += str(gantt[-1][2])  # final end time
+
+    print("\nGantt Chart:")
+    print("-" * len(bar))
+    print(bar)
+    print("-" * len(bar))
+    print(times)
+
+
+# --------------------------------------------------------------------------
+# RESULTS TABLE + AVERAGES
+# --------------------------------------------------------------------------
+def print_results(processes, completion):
+    """
+    Compute TAT and WT for each process from its completion time,
+    print a table and print the averages.
+    """
+    print("\n{:<8}{:<10}{:<8}{:<12}{:<12}{:<10}".format(
+        "Process", "Arrival", "Burst", "Completion", "Turnaround", "Waiting"))
+
+    total_wt = 0
+    total_tat = 0
+    for p in processes:
+        ct = completion[p["pid"]]
+        tat = ct - p["arrival"]      # Turnaround = Completion - Arrival
+        wt = tat - p["burst"]        # Waiting    = Turnaround - Burst
+        total_tat += tat
+        total_wt += wt
+        print("{:<8}{:<10}{:<8}{:<12}{:<12}{:<10}".format(
+            p["pid"], p["arrival"], p["burst"], ct, tat, wt))
+
+    n = len(processes)
+    print(f"\nAverage Waiting Time    : {total_wt / n:.2f}")
+    print(f"Average Turnaround Time : {total_tat / n:.2f}")
+
+
+# --------------------------------------------------------------------------
+# ALGORITHM 1: FCFS (NON-PREEMPTIVE)
+# --------------------------------------------------------------------------
+def fcfs(processes):
+    """
+    First Come First Serve.
+    Processes run in order of arrival. Once a process starts, it keeps the
+    CPU until it finishes (non-preemptive).
+    """
+    # Sort by arrival time (stable sort keeps input order for ties).
+    order = sorted(processes, key=lambda p: p["arrival"])
+
+    gantt = []
+    completion = {}
+    time = 0
+
+    for p in order:
+        # If the CPU is idle until this process arrives, record an idle block.
+        if time < p["arrival"]:
+            add_segment(gantt, "Idle", time, p["arrival"])
+            time = p["arrival"]
+
+        # Run the process to completion.
+        add_segment(gantt, p["pid"], time, time + p["burst"])
+        time += p["burst"]
+        completion[p["pid"]] = time
+
+    return gantt, completion
+
+
+# --------------------------------------------------------------------------
+# ALGORITHM 2: ROUND ROBIN (PREEMPTIVE)
+# --------------------------------------------------------------------------
+def round_robin(processes, quantum):
+    """
+    Round Robin.
+    Each process may run for at most `quantum` time units. If it is not done,
+    it is preempted and sent to the back of the ready queue.
+    """
+    order = sorted(processes, key=lambda p: p["arrival"])
+    remaining = {p["pid"]: p["burst"] for p in processes}  # burst left
+    completion = {}
+    gantt = []
+
+    ready = deque()   # the ready queue (FIFO)
+    time = 0
+    i = 0             # index of the next process (in `order`) yet to arrive
+    n = len(order)
+
+    # Put every process that has arrived by time `t` into the ready queue.
+    def enqueue_arrivals(t):
+        nonlocal i
+        while i < n and order[i]["arrival"] <= t:
+            ready.append(order[i]["pid"])
+            i += 1
+
+    enqueue_arrivals(time)
+
+    while len(completion) < n:
+        # Nothing ready -> CPU is idle until the next process arrives.
+        if not ready:
+            next_arrival = order[i]["arrival"]
+            add_segment(gantt, "Idle", time, next_arrival)
+            time = next_arrival
+            enqueue_arrivals(time)
+            continue
+
+        pid = ready.popleft()
+
+        # Run for one quantum, or less if the process needs less time.
+        run = min(quantum, remaining[pid])
+        add_segment(gantt, pid, time, time + run)
+        time += run
+        remaining[pid] -= run
+
+        # IMPORTANT: processes that arrived DURING this time slice join the
+        # queue BEFORE the preempted process goes back to the end.
+        enqueue_arrivals(time)
+
+        if remaining[pid] == 0:
+            completion[pid] = time       # finished
+        else:
+            ready.append(pid)            # preempted -> back of the queue
+
+    return gantt, completion
+
+
+# --------------------------------------------------------------------------
+# MAIN PROGRAM
+# --------------------------------------------------------------------------
+def main():
+    print("=" * 50)
+    print("        CPU SCHEDULING SIMULATOR")
+    print("=" * 50)
+
+    processes = read_processes()
+    quantum = read_int("\nEnter time quantum (for Round Robin): ", minimum=1)
+
+    # --- Non-preemptive: FCFS ---
+    print("\n" + "=" * 50)
+    print("  First Come First Serve (FCFS) - Non-Preemptive")
+    print("=" * 50)
+    gantt, completion = fcfs(processes)
+    print_gantt(gantt)
+    print_results(processes, completion)
+
+    # --- Preemptive: Round Robin ---
+    print("\n" + "=" * 50)
+    print(f"  Round Robin (Quantum = {quantum}) - Preemptive")
+    print("=" * 50)
+    gantt, completion = round_robin(processes, quantum)
+    print_gantt(gantt)
+    print_results(processes, completion)
+
+
+if __name__ == "__main__":
+    main()
